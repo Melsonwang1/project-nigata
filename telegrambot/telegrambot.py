@@ -19,9 +19,20 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Dictionary to track users filing complaints
 pending_complaints = {}
 
-def get_gemini_response(prompt):
+def get_gemini_response(prompt, purpose="general"):
     """Fetch response from Gemini AI using a customer service tone."""
     try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+
+        if purpose == "complaint_check":
+            response = model.generate_content(
+                f"Classify the following text as a complaint or not a complaint. Respond only with 'complaint' or 'not complaint'.: {prompt}"
+            )
+            if response and response.text:
+                return response.text.strip().lower()
+            else:
+                return "not complaint"  # Default to not complaint if classification fails
+
         # Detect specific requests related to NewJeans business
         lowered_prompt = prompt.lower()
 
@@ -45,11 +56,9 @@ def get_gemini_response(prompt):
             )
 
         # Default AI response with Gemini
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(f"You are a friendly customer service assistant specializing in NewJeans merchandise and music {prompt}")
-        if response and response.text.strip().lower() == "complaint":
-            return "complaint"
-
+        response = model.generate_content(
+            f"You are a friendly customer service assistant specializing in NewJeans merchandise and music. {prompt}"
+        )
         if response and response.text:
             return response.text.strip()
         else:
@@ -82,11 +91,11 @@ async def handle_complaint_request(update: Update, context: CallbackContext):
     """Check if the message is a complaint and ask for details if it is."""
     user_id = update.message.chat_id
     user_message = update.message.text
-    
+
     # Use Gemini AI to classify the message
-    classification = get_gemini_response(user_message)
-    
-    if classification.lower() == "complaint":
+    classification = get_gemini_response(user_message, purpose="complaint_check")
+
+    if classification == "complaint":
         pending_complaints[user_id] = True  # Mark this user as making a complaint
         await update.message.reply_text(
             "I'm sorry to hear that! 😢 Please describe your complaint, including the product or issue, "
@@ -101,17 +110,17 @@ async def handle_complaint_details(update: Update, context: CallbackContext):
     user_id = user.id
     username = user.username  # Get Telegram username
     complaint_text = update.message.text
-    
+
     # Verify that the user has a pending complaint
     if user_id not in pending_complaints:
         return  # Ignore if no complaint was expected
-    
+
     # Classify the message again to ensure it's a complaint
-    classification = get_gemini_response(complaint_text)
-    if classification.lower() != "complaint":
+    classification = get_gemini_response(complaint_text, purpose="complaint_check")
+    if classification != "complaint":
         await update.message.reply_text("It seems like this may not be a complaint. How else can I assist you?")
         return
-    
+
     del pending_complaints[user_id]  # Remove tracking after submission
     user_identifier = f"@{username}" if username else f"ID: {user_id}"
 
@@ -133,16 +142,31 @@ async def handle_complaint_details(update: Update, context: CallbackContext):
 async def handle_message(update: Update, context: CallbackContext):
     """Handle user messages"""
     user_id = update.message.chat_id
-    user_message = update.message.text.lower()
-
-    # Check if user wants to file a complaint
-    if "i want to make a complaint" in user_message or "file a complaint" in user_message:
-        await handle_complaint_request(update, context)
-        return
+    user_message = update.message.text
 
     # If the user has a pending complaint, treat their next message as the complaint details
     if user_id in pending_complaints:
         await handle_complaint_details(update, context)
+        return
+
+    # Check if the message itself is a complaint
+    classification = get_gemini_response(user_message, purpose="complaint_check")
+    if classification == "complaint":
+        # Send complaint to business owner
+        user = update.message.from_user
+        username = user.username
+        user_identifier = f"@{username}" if username else f"ID: {user_id}"
+        owner_message = (
+            f"📢 **New Complaint Received!** 📢\n\n"
+            f"👤 **User:** {user_identifier}\n"
+            f"💬 **Complaint:** {user_message}\n\n"
+            f"📞 Please reach out to the customer directly."
+        )
+        await context.bot.send_message(chat_id=OWNER_TELEGRAM_ID, text=owner_message)
+        await update.message.reply_text(
+            "Thank you for your feedback! 🙏 Your complaint has been forwarded to our team, "
+            "and we will get back to you as soon as possible."
+        )
         return
 
     # General AI response
