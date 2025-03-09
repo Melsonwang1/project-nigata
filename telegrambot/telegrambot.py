@@ -1,9 +1,12 @@
 import logging
 import os
+import datetime
+import pytz  # For timezone handling
 from keep_alive import keep_alive
 import google.generativeai as genai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
+
 
 # Load environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -18,6 +21,9 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 # Dictionary to track users filing complaints
 pending_complaints = {}
+
+# Dictionary to track user start times
+user_start_times = {}
 
 def get_gemini_response(prompt, purpose="general"):
     """Fetch response from Gemini AI using a customer service tone."""
@@ -70,7 +76,80 @@ def get_gemini_response(prompt, purpose="general"):
 
 async def start(update: Update, context: CallbackContext):
     """Handle /start command"""
+    user_id = update.message.chat_id
+
     await update.message.reply_text("Hello! Welcome to **NewJeans Customer Service**. How can I assist you today? 🎶🛍️")
+
+    # Check if this is the user's first time
+    if user_id not in user_start_times:
+        user_start_times[user_id] = datetime.datetime.now()
+        await send_initial_promotion(update, context)  # Send immediate promotion
+        await schedule_weekly_promotion(context, user_id)  # Schedule weekly job
+
+async def send_weekly_promotion(context: CallbackContext):
+    """Send weekly promotion to all users."""
+    for user_id in user_start_times:
+        try:
+            promotion_message = get_promotion_message()
+            await context.bot.send_message(chat_id=user_id, text=promotion_message)
+            logging.info(f"Sent weekly promotion to user {user_id}")
+        except Exception as e:
+            logging.error(f"Error sending weekly promotion to user {user_id}: {e}")
+
+async def schedule_weekly_promotion(context: CallbackContext, user_id: int):
+    """Schedule the weekly promotion job for a specific user."""
+    # Define the desired day of the week (0=Monday, 6=Sunday)
+    promotion_day = 6  # Sunday
+    # Define the desired time (in hours and minutes)
+    promotion_hour = 10
+    promotion_minute = 0
+    # Get the current time in the user's timezone (replace with actual user timezone if known)
+    now = datetime.datetime.now(pytz.timezone('Asia/Singapore'))  # Example timezone
+
+    # Calculate the time for the next promotion
+    target_time = now.replace(hour=promotion_hour, minute=promotion_minute, second=0, microsecond=0)
+    days_ahead = (promotion_day - now.weekday() + 7) % 7
+    if days_ahead == 0 and target_time <= now:
+        days_ahead = 7
+    target_time += datetime.timedelta(days=days_ahead)
+
+    # Calculate the time difference in seconds
+    time_diff_seconds = (target_time - now).total_seconds()
+
+    # Schedule the job
+    context.job_queue.run_repeating(
+        send_weekly_promotion,
+        interval=datetime.timedelta(weeks=1).total_seconds(),  # Reverted back to weekly
+        first=time_diff_seconds,
+        name=f"weekly_promotion_{user_id}"
+    )
+    logging.info(f"Scheduled weekly promotion for user {user_id} to start in {time_diff_seconds} seconds")
+
+
+async def send_initial_promotion(update: Update, context: CallbackContext):
+    """Send a promotion immediately when the user starts the bot."""
+    promotion_message = get_promotion_message(initial=True)
+    await update.message.reply_text(promotion_message)
+
+
+def get_promotion_message(initial=False):
+    """
+    Generate the promotion message.
+
+    You should customize this function to provide actual promotional content.
+    """
+    if initial:
+        return (
+            "🎉 **Welcome to NewJeans Customer Service!** 🎉\n\n"
+            "As a special welcome gift, enjoy 10% off your first merchandise order! Use code 'WELCOME10' at checkout. 🛍️\n\n"
+            "Stay tuned for weekly updates on new releases, exclusive offers, and more! 🎶"
+        )
+    else:
+        return (
+            "📢 **Weekly NewJeans Update!** 📢\n\n"
+            "This week's featured item: Limited Edition 'OMG' Photocards! Collect them all! ✨\n\n"
+            "Don't miss out on our ongoing sale: Get 20% off all albums! 💿"
+        )
 
 async def help_command(update: Update, context: CallbackContext):
     """Handle /help command"""
