@@ -159,12 +159,27 @@ async def help_command(update: Update, context: CallbackContext):
         "🎵 **/recommend** - Get a NewJeans song recommendation\n"
         "📦 **/orderstatus** - Check your order status\n"
         "📞 **/contact** - Contact support\n"
-        "⚠ **/complain** - File a complaint"
+        "⚠ **/complain** - File a complaint\n"
+        "🎁 **/promotions** - View current promotions"
     )
 
 async def contact_command(update: Update, context: CallbackContext):
     """Handle /contact command"""
     await update.message.reply_text("You can reach us at **newjeansupport@gmail.com** or reply here for assistance. 📧")
+
+async def complain_command(update: Update, context: CallbackContext):
+    """Handle /complain command"""
+    user_id = update.message.chat_id
+    pending_complaints[user_id] = True  # Mark this user as making a complaint
+    await update.message.reply_text(
+        "I'm sorry to hear that! 😢 Please describe your complaint, including the product or issue, "
+        "and I will forward it to the team."
+    )
+
+async def promotions_command(update: Update, context: CallbackContext):
+    """Handle /promotions command"""
+    promotion_message = get_promotion_message()  # Get the latest promotion message
+    await update.message.reply_text(promotion_message)
 
 async def handle_complaint_request(update: Update, context: CallbackContext):
     """Check if the message is a complaint and ask for details if it is."""
@@ -261,6 +276,8 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("contact", contact_command))
+    app.add_handler(CommandHandler("complain", complain_command)) #add this line
+    app.add_handler(CommandHandler("promotions", promotions_command)) #add this line
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Start the bot
